@@ -1,13 +1,21 @@
 {
   "name": "pm2-logs-viewer",
   "version": "1.0.0",
-  "description": "",
-  "main": "dist/index.js",
+  "description": "Internal web tool for viewing live PM2 process status and streaming logs",
+  "main": "dist/server.js",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "pm2": "^7.0.1",
+    "ws": "^8.18.0"
+  },
   "devDependencies": {
+    "@types/node": "^25.0.0",
+    "@types/ws": "^8.5.12",
+    "ts-node": "^10.9.2",
     "typescript": "^5.5.3"
   },
   "private": true

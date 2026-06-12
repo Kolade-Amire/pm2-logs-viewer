@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM2 Log Viewer</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2f3a;
+    --text: #d7dae0;
+    --muted: #8b93a1;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  #connStatus { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .dot.green { background: var(--green); }
+  .dot.red { background: var(--red); }
+  .dot.yellow { background: var(--yellow); }
+
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px; }
+  .hidden { display: none !important; }
+
+  /* token gate */
+  #tokenGate {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  #tokenGate form {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 24px; width: 320px; display: flex; flex-direction: column; gap: 10px;
+  }
+  #tokenGate h2 { margin: 0 0 4px; font-size: 16px; }
+  #tokenGate input {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 8px 10px; font-size: 14px;
+  }
+  #tokenGate button {
+    background: var(--accent); border: 0; border-radius: 6px; color: #fff;
+    padding: 8px; font-size: 14px; cursor: pointer;
+  }
+  #tokenError { color: var(--red); font-size: 12px; min-height: 16px; margin: 0; }
+
+  /* process list */
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #1d2129; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-variant-numeric: tabular-nums; }
+  #emptyMsg { color: var(--muted); padding: 24px; text-align: center; }
+
+  /* log view */
+  #logView { gap: 10px; }
+  .logHead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .logHead h2 { margin: 0; font-size: 16px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); }
+  .badge.online { color: var(--green); border-color: var(--green); }
+  .badge.errored { color: var(--red); border-color: var(--red); }
+  .badge.degraded { color: var(--yellow); border-color: var(--yellow); }
+  #backBtn, #clearBtn {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 5px 12px; font-size: 13px; cursor: pointer;
+  }
+  #backBtn:hover, #clearBtn:hover { border-color: var(--muted); }
+  .logControls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #filterInput {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 5px 10px; font-size: 13px; width: 260px;
+  }
+  .logControls label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  #logStreamStatus { font-size: 12px; color: var(--yellow); margin-left: auto; }
+
+  #logBox {
+    flex: 1; min-height: 0; overflow-y: auto;
+    background: #0a0c10; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px;
+    font: 12px/1.5 "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  }
+  .line { white-space: pre-wrap; word-break: break-all; }
+  .line.err .text { color: #ff7b66; }
+  .line.filtered { display: none; }
+  .ts { display: none; color: var(--muted); margin-right: 8px; }
+  #logBox.show-ts .ts { display: inline; }
+  .tag { display: none; color: var(--accent); margin-right: 8px; }
+  #logBox.multi .tag { display: inline; }
+</style>
+</head>
+<body>
+
+<div id="tokenGate" class="hidden">
+  <form id="tokenForm">
+    <h2>PM2 Log Viewer</h2>
+    <p id="tokenError"></p>
+    <input id="tokenInput" type="password" placeholder="Access token" autocomplete="off" autofocus>
+    <button type="submit">Connect</button>
+  </form>
+</div>
+
+<header>
+  <h1>PM2 Log Viewer</h1>
+  <span id="connStatus"><span class="dot red" id="connDot"></span><span id="connText">disconnected</span></span>
+</header>
+
+<main id="listView">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th><th>Instances</th><th>Status</th><th>CPU</th>
+        <th>Memory</th><th>Restarts</th><th>Uptime</th>
+      </tr>
+    </thead>
+    <tbody id="procRows"></tbody>
+  </table>
+  <div id="emptyMsg" class="hidden">No PM2 processes found.</div>
+</main>
+
+<main id="logView" class="hidden">
+  <div class="logHead">
+    <button id="backBtn">&larr; Back</button>
+    <h2 id="logTitle"></h2>
+    <span class="badge" id="logBadge"></span>
+    <span id="logInstances" style="color:var(--muted);font-size:13px"></span>
+  </div>
+  <div class="logControls">
+    <input id="filterInput" type="text" placeholder="Filter lines&hellip;">
+    <label><input type="checkbox" id="tsToggle"> timestamps</label>
+    <button id="clearBtn">Clear</button>
+    <span id="logStreamStatus"></span>
+  </div>
+  <div id="logBox"></div>
+</main>
+
+<script>
+'use strict';
+
+// ---- tunables -------------------------------------------------------------
+const MAX_RETAINED_LINES = 10000;   // display cap; oldest lines are dropped beyond this
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 15000;
+const TOKEN_KEY = 'pm2lv_token';
+
+// Relative base so the app works at / and behind a path prefix (nginx Option B).
+const BASE = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
+const WS_BASE = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + BASE;
+
+const $ = (id) => document.getElementById(id);
+
+let token = localStorage.getItem(TOKEN_KEY) || '';
+let groups = [];                 // latest ProcessGroup[]
+let procWs = null;
+let procBackoff = RECONNECT_MIN_MS;
+let logWs = null;
+let logBackoff = RECONNECT_MIN_MS;
+let currentProcess = null;       // process name while in log view
+let stickBottom = true;
+let filterText = '';
+let gated = false;
+
+// ---- token gate -------------------------------------------------------------
+
+function showGate(message) {
+  gated = true;
+  if (procWs) { procWs.onclose = null; procWs.close(); procWs = null; }
+  closeLogWs();
+  setConn(false);
+  $('tokenError').textContent = message || '';
+  $('tokenGate').classList.remove('hidden');
+  $('tokenInput').focus();
+}
+
+$('tokenForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  token = $('tokenInput').value.trim();
+  if (!token) return;
+  localStorage.setItem(TOKEN_KEY, token);
+  start();
+});
+
+async function checkAuth() {
+  const res = await fetch(BASE + 'api/processes', {
+    headers: { Authorization: 'Bearer ' + token },
+    cache: 'no-store',
+  });
+  if (res.status === 401) return false;
+  return true; // 503 (pm2 down) still means the token is good
+}
+
+async function start() {
+  if (!token) { showGate(); return; }
+  let ok;
+  try {
+    ok = await checkAuth();
+  } catch {
+    showGate('Cannot reach server. Retry.');
+    return;
+  }
+  if (!ok) { showGate('Invalid token.'); return; }
+  gated = false;
+  $('tokenGate').classList.add('hidden');
+  connectProcWs();
+  route();
+}
+
+// ---- connection status -------------------------------------------------------
+
+function setConn(connected) {
+  $('connDot').className = 'dot ' + (connected ? 'green' : 'red');
+  $('connText').textContent = connected ? 'connected' : 'disconnected';
+}
+
+// ---- /ws/processes (kept open in both views: feeds table + log heading) -------
+
+function connectProcWs() {
+  if (gated || (procWs && procWs.readyState <= WebSocket.OPEN)) return;
+  procWs = new WebSocket(WS_BASE + 'ws/processes?token=' + encodeURIComponent(token));
+  procWs.onopen = () => { procBackoff = RECONNECT_MIN_MS; setConn(true); };
+  procWs.onmessage = (e) => {
+    groups = JSON.parse(e.data);
+    renderList();
+    if (currentProcess !== null) renderLogHeading();
+  };
+  procWs.onclose = async () => {
+    procWs = null;
+    setConn(false);
+    if (gated) return;
+    // Distinguish auth rejection from a down server before reconnecting.
+    try {
+      if (!(await checkAuth())) { showGate('Session rejected — re-enter token.'); return; }
+    } catch { /* server unreachable; fall through to retry */ }
+    setTimeout(connectProcWs, procBackoff);
+    procBackoff = Math.min(procBackoff * 2, RECONNECT_MAX_MS);
+  };
+}
+
+// ---- routing -----------------------------------------------------------------
+
+function route() {
+  const m = location.hash.match(/^#\/logs\/(.+)$/);
+  if (m) {
+    showLogView(decodeURIComponent(m[1]));
+  } else {
+    showListView();
+  }
+}
+window.addEventListener('hashchange', route);
+
+function showListView() {
+  currentProcess = null;
+  closeLogWs();
+  $('logView').classList.add('hidden');
+  $('listView').classList.remove('hidden');
+}
+
+function showLogView(name) {
+  if (currentProcess === name && logWs) return;
+  closeLogWs();
+  currentProcess = name;
+  $('listView').classList.add('hidden');
+  $('logView').classList.remove('hidden');
+  $('logBox').textContent = '';
+  $('filterInput').value = '';
+  filterText = '';
+  stickBottom = true;
+  renderLogHeading();
+  connectLogWs(name);
+}
+
+$('backBtn').addEventListener('click', () => { location.hash = '#/'; });
+
+// ---- process list ---------------------------------------------------------------
+
+function groupStatus(g) {
+  if (g.instances.some((i) => i.status === 'errored')) return 'errored';
+  if (g.instances.length > 0 && g.instances.every((i) => i.status === 'online')) return 'online';
+  return 'degraded';
+}
+
+function fmtBytes(b) {
+  if (b >= 1024 * 1024 * 1024) return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  return (b / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function fmtUptime(ms) {
+  if (ms <= 0) return '—';
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+        m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (d > 0) return d + 'd ' + h + 'h';
+  if (h > 0) return h + 'h ' + m + 'm';
+  if (m > 0) return m + 'm ' + sec + 's';
+  return sec + 's';
+}
+
+const STATUS_DOT = { online: 'green', errored: 'red', degraded: 'yellow' };
+
+function renderList() {
+  const tbody = $('procRows');
+  tbody.textContent = '';
+  $('emptyMsg').classList.toggle('hidden', groups.length > 0);
+  for (const g of groups) {
+    const st = groupStatus(g);
+    const cpu = g.instances.reduce((a, i) => a + i.cpu, 0);
+    const mem = g.instances.reduce((a, i) => a + i.memory, 0);
+    const restarts = g.instances.reduce((a, i) => a + i.restarts, 0);
+    const uptime = Math.max(0, ...g.instances.map((i) => i.uptime));
+
+    const tr = document.createElement('tr');
+    const cells = [
+      g.name,
+      String(g.instances.length),
+      null, // status cell built below
+      cpu.toFixed(0) + '%',
+      fmtBytes(mem),
+      String(restarts),
+      fmtUptime(uptime),
+    ];
+    cells.forEach((text, idx) => {
+      const td = document.createElement('td');
+      if (idx === 2) {
+        const dot = document.createElement('span');
+        dot.className = 'dot ' + STATUS_DOT[st];
+        td.append(dot, ' ' + st);
+      } else {
+        td.textContent = text;
+        if (idx >= 3) td.className = 'num';
+      }
+      tr.appendChild(td);
+    });
+    tr.addEventListener('click', () => {
+      location.hash = '#/logs/' + encodeURIComponent(g.name);
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+// ---- log view ----------------------------------------------------------------------
+
+function currentGroup() {
+  return groups.find((g) => g.name === currentProcess) || null;
+}
+
+function renderLogHeading() {
+  $('logTitle').textContent = currentProcess;
+  const g = currentGroup();
+  const badge = $('logBadge');
+  if (g) {
+    const st = groupStatus(g);
+    badge.textContent = st;
+    badge.className = 'badge ' + st;
+    $('logInstances').textContent =
+      g.instances.length + (g.instances.length === 1 ? ' instance' : ' instances');
+    $('logBox').classList.toggle('multi', g.instances.length > 1);
+  } else {
+    badge.textContent = 'unknown';
+    badge.className = 'badge';
+    $('logInstances').textContent = '';
+  }
+}
+
+function fmtTs(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleTimeString();
+}
+
+function appendLine(l) {
+  const box = $('logBox');
+  const el = document.createElement('div');
+  el.className = 'line ' + (l.stream === 'err' ? 'err' : 'out');
+  el.dataset.l = l.line.toLowerCase();
+
+  const ts = document.createElement('span');
+  ts.className = 'ts';
+  ts.textContent = fmtTs(l.ts);
+
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.textContent = '[id:' + l.pm_id + ']';
+
+  const text = document.createElement('span');
+  text.className = 'text';
+  text.textContent = l.line;
+
+  el.append(ts, tag, text);
+  if (filterText && !el.dataset.l.includes(filterText)) el.classList.add('filtered');
+  box.appendChild(el);
+
+  while (box.childElementCount > MAX_RETAINED_LINES) box.removeChild(box.firstElementChild);
+  if (stickBottom) box.scrollTop = box.scrollHeight;
+}
+
+$('logBox').addEventListener('scroll', () => {
+  const box = $('logBox');
+  stickBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 10;
+});
+
+$('filterInput').addEventListener('input', () => {
+  filterText = $('filterInput').value.toLowerCase();
+  for (const el of $('logBox').children) {
+    el.classList.toggle('filtered', Boolean(filterText) && !el.dataset.l.includes(filterText));
+  }
+  if (stickBottom) $('logBox').scrollTop = $('logBox').scrollHeight;
+});
+
+$('tsToggle').addEventListener('change', () => {
+  $('logBox').classList.toggle('show-ts', $('tsToggle').checked);
+});
+
+$('clearBtn').addEventListener('click', () => {
+  $('logBox').textContent = ''; // display only — files are untouched
+});
+
+function closeLogWs() {
+  if (logWs) {
+    logWs.onclose = null;
+    logWs.close();
+    logWs = null;
+  }
+  $('logStreamStatus').textContent = '';
+}
+
+function connectLogWs(name) {
+  logWs = new WebSocket(
+    WS_BASE + 'ws/logs/' + encodeURIComponent(name) + '?token=' + encodeURIComponent(token)
+  );
+  logWs.onopen = () => {
+    logBackoff = RECONNECT_MIN_MS;
+    $('logStreamStatus').textContent = '';
+  };
+  logWs.onmessage = (e) => appendLine(JSON.parse(e.data));
+  logWs.onclose = () => {
+    logWs = null;
+    if (gated || currentProcess !== name) return;
+    $('logStreamStatus').textContent = 'stream disconnected — reconnecting…';
+    setTimeout(() => {
+      if (currentProcess === name && !logWs) connectLogWs(name);
+    }, logBackoff);
+    logBackoff = Math.min(logBackoff * 2, RECONNECT_MAX_MS);
+  };
+}
+
+// ---- boot ---------------------------------------------------------------------------
+
+start();
+</script>
+</body>
+</html>
